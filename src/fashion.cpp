@@ -9,9 +9,11 @@
  *       - Initial version (Jack Barnard, 2026-10-23)
  *       - Combined sections 3 and 4 into one CLI (2026-10-29)
  *       - Updated executable and model folder paths (2026-10-29)
+ *       - Unified terminal theme and in-place screens (2026-10-29)
  * ======================================================= */
 
 #include "ansi.hpp"
+#include "terminal.hpp"
 #include "cli.hpp"
 #include "commands.hpp"
 #include "neural_network.hpp"
@@ -21,12 +23,14 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace {
+const std::string SECTION = "Section 4 - Fashion-MNIST";
 constexpr std::size_t PIXELS = 784;
 constexpr std::size_t CLASSES = 10;
 const std::array<const char*, CLASSES> CLASS_NAMES = {
@@ -189,8 +193,8 @@ std::size_t argmax(const Matrix& output) {
 
 void showImage(const Sample& sample) {
     const char* shades = " .:-=+*#%@";
-    std::cout << ansi::BOLD << "Actual label: " << sample.label << " - " << CLASS_NAMES[sample.label]
-              << ansi::RESET << "\n\n";
+    std::cout << ui::styled(ansi::CYAN, "Actual label: ") << sample.label
+              << " - " << CLASS_NAMES[sample.label] << "\n\n";
     for (std::size_t row = 0; row < 28; ++row) {
         for (std::size_t col = 0; col < 28; ++col)
             std::cout << shades[(static_cast<unsigned>(sample.raw[row * 28 + col]) * 9) / 255];
@@ -198,57 +202,78 @@ void showImage(const Sample& sample) {
     }
 }
 
+void trainingConfiguration(const Options& options) {
+    ui::screen(SECTION, "Training");
+    std::cout << "Dataset:         " << options.trainCsv << '\n'
+              << "Architecture:    " << joinArchitecture(options.architecture) << '\n'
+              << "Epochs:          " << options.epochs << '\n'
+              << "Learning rate:   " << options.rate << '\n'
+              << "Report interval: " << options.report << " samples\n"
+              << "Model file:      " << options.model << '\n'
+              << "Sample limit:    " << (options.limit ? std::to_string(options.limit) : "all rows")
+              << "\n\n";
+}
+
 void train(const Options& options) {
-    std::cout << ansi::CYAN << ansi::BOLD << "\nTRAINING\n" << ansi::RESET
-              << "Dataset:      " << locateCsv(options.trainCsv) << '\n'
-              << "Architecture: " << joinArchitecture(options.architecture) << '\n'
-              << "Epochs:       " << options.epochs << '\n'
-              << "Learning rate:" << ' ' << options.rate << '\n'
-              << "Sample limit: " << (options.limit ? std::to_string(options.limit) : "all rows") << "\n\n";
+    trainingConfiguration(options);
+    // Resolve paths and construct the network after rendering, so errors replace this page.
+    locateCsv(options.trainCsv);
     NeuralNetwork network(options.architecture, options.rate, 20261023u);
     for (std::size_t epoch = 1; epoch <= options.epochs; ++epoch) {
         double loss = 0.0;
-        std::size_t count = readCsv(options.trainCsv, options.limit, [&](const Sample& sample, std::size_t index) {
-            loss += network.update(sample.input, sample.target);
-            if ((index + 1) % options.report == 0)
-                std::cout << ansi::DIM << "Epoch " << epoch << ": " << (index + 1)
-                          << " samples, mean loss " << loss / (index + 1) << ansi::RESET << '\n';
-        });
-        std::cout << ansi::GREEN << "Epoch " << epoch << " complete" << ansi::RESET
-                  << ": " << count << " samples, mean loss " << loss / count << '\n';
+        auto renderProgress = [&](std::size_t count, bool complete) {
+            if (ui::enabled()) trainingConfiguration(options);
+            std::cout << ui::styled(ansi::CYAN, "Epoch ") << epoch << '/' << options.epochs
+                      << "  Samples: " << count << "  " << ui::styled(ansi::YELLOW, "Loss ")
+                      << std::fixed << std::setprecision(8) << loss / count;
+            if (complete) std::cout << "  " << ui::styled(ansi::GREEN, "Epoch complete");
+            std::cout << '\n' << std::flush;
+        };
+        const std::size_t count = readCsv(options.trainCsv, options.limit,
+            [&](const Sample& sample, std::size_t index) {
+                loss += network.update(sample.input, sample.target);
+                if ((index + 1) % options.report == 0) renderProgress(index + 1, false);
+            });
+        renderProgress(count, true);
     }
     const std::filesystem::path modelPath(options.model);
     if (modelPath.has_parent_path()) std::filesystem::create_directories(modelPath.parent_path());
     network.save(options.model);
-    std::cout << ansi::GREEN << ansi::BOLD << "Saved model: " << options.model << ansi::RESET << '\n';
+    std::cout << '\n' << ui::styled(ansi::GREEN, "Training complete")
+              << "\nSaved model to: " << options.model << '\n';
 }
 
 void test(const Options& options) {
-    std::cout << ansi::CYAN << ansi::BOLD << "\nTESTING\n" << ansi::RESET
-              << "Dataset: " << locateCsv(options.testCsv) << '\n'
-              << "Model:   " << options.model << "\n\n";
+    ui::screen(SECTION, "Testing");
+    std::cout << "Dataset: " << options.testCsv << "\nModel:   " << options.model << '\n';
     auto network = NeuralNetwork::load(options.model);
     if (network.architecture().front() != PIXELS || network.architecture().back() != CLASSES)
         fail("This is not a Fashion-MNIST model (expected 784 inputs and 10 outputs)");
     std::array<std::array<std::size_t, CLASSES>, CLASSES> confusion{};
     std::size_t correct = 0;
-    bool shown = false;
-    const std::size_t count = readCsv(options.testCsv, options.limit, [&](const Sample& sample, std::size_t) {
-        const Matrix output = network.predict(sample.input);
-        const std::size_t prediction = argmax(output);
-        ++confusion[sample.label][prediction];
-        if (prediction == sample.label) ++correct;
-        if (options.preview && !shown) {
-            showImage(sample);
-            std::cout << "Prediction: " << prediction << " - " << CLASS_NAMES[prediction]
-                      << " (output " << output.at(prediction, 0) << ")\n\n";
-            shown = true;
-        }
-    });
+    // Keep only the first preview so progress refreshes cannot erase it permanently.
+    std::optional<Sample> preview;
+    const std::size_t count = readCsv(options.testCsv, options.limit,
+        [&](const Sample& sample, std::size_t index) {
+            const Matrix output = network.predict(sample.input);
+            const std::size_t prediction = argmax(output);
+            ++confusion[sample.label][prediction];
+            if (prediction == sample.label) ++correct;
+            if (options.preview && !preview) preview = sample;
+            if ((index + 1) % options.report == 0) {
+                if (ui::enabled()) ui::screen(SECTION, "Testing");
+                std::cout << "Model: " << options.model << '\n'
+                          << ui::styled(ansi::CYAN, "Samples tested: ") << index + 1 << '\n'
+                          << "Correct: " << correct << '\n' << std::flush;
+            }
+        });
+    ui::screen(SECTION, "Test Results");
     const double accuracy = 100.0 * static_cast<double>(correct) / static_cast<double>(count);
-    std::cout << ansi::GREEN << ansi::BOLD << "Accuracy: " << std::fixed << std::setprecision(2)
-              << accuracy << "%" << ansi::RESET << " (" << correct << '/' << count << ")\n\n";
-    std::cout << "Confusion matrix: rows = actual class, columns = predicted class\n    ";
+    std::cout << "Model: " << options.model << '\n'
+              << ui::styled(ansi::GREEN, "Accuracy: ") << std::fixed << std::setprecision(2)
+              << accuracy << "% (" << correct << '/' << count << ")\n\n";
+    ui::heading("Confusion matrix");
+    std::cout << "Rows = actual class, columns = predicted class\n    ";
     for (std::size_t col = 0; col < CLASSES; ++col) std::cout << std::setw(5) << col;
     std::cout << '\n';
     for (std::size_t row = 0; row < CLASSES; ++row) {
@@ -256,9 +281,21 @@ void test(const Options& options) {
         for (auto value : confusion[row]) std::cout << std::setw(5) << value;
         std::cout << "  " << CLASS_NAMES[row] << '\n';
     }
+    if (preview) {
+        std::cout << '\n';
+        ui::heading("First test image");
+        showImage(*preview);
+        const Matrix output = network.predict(preview->input);
+        const std::size_t prediction = argmax(output);
+        const std::string result = std::to_string(prediction) + " - " + CLASS_NAMES[prediction];
+        std::cout << "Prediction: "
+                  << ui::styled(prediction == preview->label ? ansi::GREEN : ansi::RED, result)
+                  << " (output " << output.at(prediction, 0) << ")\n";
+    }
 }
 
 void predictOne(const Options& options, std::size_t index) {
+    ui::screen(SECTION, "Prediction");
     auto network = NeuralNetwork::load(options.model);
     if (network.architecture().front() != PIXELS || network.architecture().back() != CLASSES)
         fail("This is not a Fashion-MNIST model (expected 784 inputs and 10 outputs)");
@@ -268,158 +305,150 @@ void predictOne(const Options& options, std::size_t index) {
         found = true;
         const Matrix output = network.predict(sample.input);
         const std::size_t prediction = argmax(output);
+        std::cout << "Model: " << options.model << "\nImage index: " << index << "\n\n";
         showImage(sample);
-        std::cout << "\nPredicted: " << ansi::BOLD << prediction << " - " << CLASS_NAMES[prediction]
-                  << ansi::RESET << "\n\nOutputs:\n";
+        const std::string result = std::to_string(prediction) + " - " + CLASS_NAMES[prediction];
+        std::cout << "\nPrediction: "
+                  << ui::styled(prediction == sample.label ? ansi::GREEN : ansi::RED, result)
+                  << "\n\n";
+        ui::heading("Output scores");
         for (std::size_t i = 0; i < CLASSES; ++i)
-            std::cout << i << "  " << std::setw(12) << CLASS_NAMES[i] << "  " << output.at(i, 0) << '\n';
+            std::cout << (i == prediction ? ui::styled(ansi::CYAN, "> ") : "  ")
+                      << i << "  " << std::setw(12) << CLASS_NAMES[i] << "  "
+                      << std::fixed << std::setprecision(6) << output.at(i, 0) << '\n';
     });
     if (!found) fail("The requested image index is beyond the test CSV.");
 }
 
+void initialise(const Options& options) {
+    ui::screen(SECTION, "Initialise Model");
+    const std::filesystem::path modelPath(options.model);
+    if (modelPath.has_parent_path()) std::filesystem::create_directories(modelPath.parent_path());
+    NeuralNetwork(options.architecture, options.rate, 20261023u).save(options.model);
+    std::cout << "Architecture:  " << joinArchitecture(options.architecture) << '\n'
+              << "Learning rate: " << options.rate << "\n\n"
+              << ui::styled(ansi::GREEN, "Model initialised") << "\nSaved model to: " << options.model << '\n';
+}
+
 void modelInfo(const Options& options) {
+    ui::screen(SECTION, "Model Information");
     const auto network = NeuralNetwork::load(options.model);
-    std::cout << ansi::CYAN << ansi::BOLD << "\nMODEL INFORMATION\n" << ansi::RESET
-              << "File:          " << options.model << '\n'
+    std::cout << "Model file:    " << options.model << '\n'
               << "Architecture:  " << joinArchitecture(network.architecture()) << '\n'
               << "Learning rate: " << network.learningRate() << '\n';
 }
 
 void printHelp() {
-    std::cout << ansi::CYAN << ansi::BOLD << "\nELEC2300 Rho3 - Fashion-MNIST optional work\n" << ansi::RESET
-              << "Run without arguments for the interactive menu.\n\n"
-              << ansi::BOLD << "Commands\n" << ansi::RESET
-              << "  train          Train a new network using the training CSV and save its weights.\n"
-              << "  test           Load a saved model, test it against the test CSV, and print accuracy.\n"
-              << "  predict INDEX  Display one test image and predict its clothing class. INDEX starts at 0.\n"
-              << "  init           Create an untrained model file using the chosen architecture.\n"
-              << "  info           Show the architecture and learning rate stored in a model.\n"
-              << "  help           Show this explanation.\n\n"
-              << ansi::BOLD << "Options\n" << ansi::RESET
-              << "  --train-csv FILE       Training CSV path. The program also checks ./data and ./datasets.\n"
-              << "  --test-csv FILE        Test CSV path.\n"
-              << "  --model FILE           Model weights file to save or load (default: neuralNetworks/fashion.model).\n"
-              << "  --epochs N             Number of complete passes through the selected training data.\n"
-              << "  --rate R               Learning rate used when updating weights (default: 0.05).\n"
-              << "  --architecture LIST    Layer sizes, e.g. 784,64,10. 784 inputs and 10 outputs are fixed.\n"
-              << "  --limit N              Only use the first N rows. 0 means use every row. Useful for quick tests.\n"
-              << "  --report N             Print training loss after every N samples.\n"
-              << "  --preview              During testing, render the first 28x28 image in the terminal.\n\n"
-              << ansi::BOLD << "Examples\n" << ansi::RESET
-              << "  ./builds/neural_network fashion train --train-csv fashion-mnist_train.csv --epochs 3\n"
-              << "  ./builds/neural_network fashion test --test-csv fashion-mnist_test.csv --preview\n"
-              << "  ./builds/neural_network fashion train --architecture 784,128,10 --model neuralNetworks/fashion-128.model\n";
+    ui::screen(SECTION, "Help");
+    std::cout << "Run './builds/neural_network fashion' for the interactive menu.\n\n";
+    ui::heading("Commands");
+    std::cout << "  train          Train a new network and save its weights.\n"
+              << "  test           Evaluate a saved model and print accuracy.\n"
+              << "  predict INDEX  Display one test image and predict its class (index starts at 0).\n"
+              << "  init           Save an untrained model.\n"
+              << "  info           Show a saved model's architecture and learning rate.\n"
+              << "  menu           Open the interactive menu.\n"
+              << "  help           Show this explanation.\n\n";
+    ui::heading("Options");
+    std::cout << "  --train-csv FILE       Training CSV (default: fashion-mnist_train.csv).\n"
+              << "  --test-csv FILE        Test CSV (default: fashion-mnist_test.csv).\n"
+              << "  --model FILE           Model (default: neuralNetworks/fashion.model).\n"
+              << "  --epochs N             Training passes (default: 3).\n"
+              << "  --rate R               Learning rate (default: 0.05).\n"
+              << "  --architecture LIST    Layer sizes (default: 784,64,10).\n"
+              << "  --limit N              First N samples for train/test; 0 = all (default: 0).\n"
+              << "  --report N             Refresh progress every N samples (default: 1000).\n"
+              << "  --preview              Display the first image in the test results.\n"
+              << "  --no-colour            Disable ANSI colours and screen clearing.\n\n";
+    ui::heading("Examples");
+    std::cout << "  ./builds/neural_network fashion train --epochs 3\n"
+              << "  ./builds/neural_network fashion test --preview\n"
+              << "  ./builds/neural_network fashion train --architecture 784,128,10\n";
 }
 
-std::string promptText(const std::string& title, const std::string& explanation, const std::string& current) {
-    std::cout << ansi::BOLD << title << ansi::RESET << "\n" << ansi::DIM << explanation << ansi::RESET
-              << "\nCurrent: " << current << "\nEnter new value, or press Enter to keep it: ";
-    std::string line;
-    if (!std::getline(std::cin, line)) fail("Input ended");
-    return line.empty() ? current : line;
+std::string promptText(const std::string& action, const std::string& title,
+                       const std::string& explanation, const std::string& current) {
+    return ui::prompt(SECTION, action, title, explanation, current);
 }
 
-std::size_t promptSize(const std::string& title, const std::string& explanation, std::size_t current, bool zeroAllowed) {
-    const std::string value = promptText(title, explanation, std::to_string(current));
-    const auto parsed = cli::size(value);
-    if (!zeroAllowed && parsed == 0) fail(title + " must be greater than zero.");
-    return parsed;
+std::size_t promptSize(const std::string& action, const std::string& title,
+                      const std::string& explanation, std::size_t current, bool zeroAllowed) {
+    const auto value = cli::size(promptText(action, title, explanation, std::to_string(current)));
+    if (!zeroAllowed && value == 0) fail(title + " must be greater than zero.");
+    return value;
 }
 
-double promptRate(double current) {
-    const std::string value = promptText("Learning rate", "Controls the size of each weight update. Keep 0.05 for the baseline experiment.", std::to_string(current));
-    const double parsed = cli::rate(value);
-    if (parsed <= 0.0) fail("Learning rate must be positive.");
-    return parsed;
+double promptRate(const std::string& action, double current) {
+    return cli::rate(promptText(action, "Learning rate",
+        "Positive size of each weight update.", std::to_string(current)));
 }
 
-void waitForEnter() {
-    std::cout << ansi::DIM << "\nPress Enter to return to the menu..." << ansi::RESET;
-    std::string line;
-    std::getline(std::cin, line);
-}
-
-void clearScreen() { std::cout << ansi::CLEAR_SCREEN << ansi::CURSOR_HOME; }
-
-void interactiveMenu() {
-    Options options;
+void interactiveMenu(Options options = {}) {
     while (std::cin) {
-        clearScreen();
-        std::cout << ansi::CYAN << ansi::BOLD
-                  << "==================================================\n"
-                  << "       ELEC2300 Rho3 - Fashion-MNIST CLI\n"
-                  << "==================================================\n" << ansi::RESET
-                  << "This program completes the optional clothing-classification work.\n"
-                  << "Choose an action below. You can press Enter at prompts to keep defaults.\n\n"
-                  << ansi::GREEN << "1) Train model" << ansi::RESET << "      Read training images and update the network weights.\n"
-                  << ansi::GREEN << "2) Test model" << ansi::RESET << "       Measure classification accuracy on unseen test images.\n"
-                  << ansi::GREEN << "3) Predict image" << ansi::RESET << "    Inspect one test image and the network's prediction.\n"
-                  << ansi::YELLOW << "4) Initialise model" << ansi::RESET << " Create a model with random weights without training it.\n"
-                  << ansi::CYAN << "5) Model information" << ansi::RESET << " Show the saved model's architecture and learning rate.\n"
-                  << "6) Help                Explain every command and option.\n"
-                  << "7) Quit\n\n"
-                  << ansi::BOLD << "Choice: " << ansi::RESET;
+        ui::screen(SECTION, "Fashion-MNIST Menu");
+        ui::menuItem(1, "Train a new model");
+        ui::menuItem(2, "Test a saved model");
+        ui::menuItem(3, "Predict an image");
+        ui::menuItem(4, "Initialise a model");
+        ui::menuItem(5, "Model information");
+        ui::menuItem(6, "Help");
+        ui::menuItem(7, "Quit");
+        ui::choicePrompt();
         std::string line;
         if (!std::getline(std::cin, line)) return;
         try {
             const auto choice = cli::size(line);
             if (choice == 1) {
-                clearScreen();
-                std::cout << ansi::CYAN << ansi::BOLD << "TRAIN MODEL\n\n" << ansi::RESET;
-                options.trainCsv = promptText("Training CSV", "Path to the Fashion-MNIST training CSV. You may enter just the filename; ./data and ./datasets are also searched.", options.trainCsv);
-                options.model = promptText("Model output", "Where trained weights and biases will be saved.", options.model);
-                options.epochs = promptSize("Epochs", "One epoch is one complete pass through the selected training rows.", options.epochs, false);
-                options.rate = promptRate(options.rate);
-                const std::string architecture = promptText("Architecture", "Comma-separated neurons in each layer. Fashion-MNIST requires 784 inputs and 10 outputs; change the hidden layers for section 4.2.", joinArchitecture(options.architecture));
-                options.architecture = parseArchitecture(architecture);
-                options.limit = promptSize("Training row limit", "Use fewer rows for a quick check. Enter 0 to use the entire CSV.", options.limit, true);
-                options.report = promptSize("Loss report interval", "Print average training loss after this many samples.", options.report, false);
+                const std::string action = "Train a New Model";
+                options.trainCsv = promptText(action, "Training CSV",
+                    "Training CSV path. Also searches data/, datasets/ and Optional Work/.", options.trainCsv);
+                options.model = promptText(action, "Model output", "Where to save trained weights and biases.", options.model);
+                options.epochs = promptSize(action, "Epochs", "Passes through the selected training rows.", options.epochs, false);
+                options.rate = promptRate(action, options.rate);
+                options.architecture = parseArchitecture(promptText(action, "Architecture",
+                    "Comma-separated layer sizes with 784 inputs and 10 outputs.", joinArchitecture(options.architecture)));
+                options.limit = promptSize(action, "Training row limit", "0 uses the entire CSV.", options.limit, true);
+                options.report = promptSize(action, "Report interval", "Refresh progress after this many samples.", options.report, false);
                 train(options);
             } else if (choice == 2) {
-                clearScreen();
-                std::cout << ansi::CYAN << ansi::BOLD << "TEST MODEL\n\n" << ansi::RESET;
-                options.testCsv = promptText("Test CSV", "Path to the Fashion-MNIST test CSV. You may enter just the filename; ./data and ./datasets are also searched.", options.testCsv);
-                options.model = promptText("Model file", "Saved model to evaluate.", options.model);
-                options.limit = promptSize("Test row limit", "Use fewer rows for a quick check. Enter 0 to test every row.", options.limit, true);
-                const std::string preview = promptText("Preview image", "Enter y to render the first test image using terminal characters, otherwise n.", options.preview ? "y" : "n");
-                options.preview = !preview.empty() && (preview[0] == 'y' || preview[0] == 'Y');
+                const std::string action = "Test a Saved Model";
+                options.testCsv = promptText(action, "Test CSV", "CSV of images to evaluate.", options.testCsv);
+                options.model = promptText(action, "Model file", "Saved model to evaluate.", options.model);
+                options.limit = promptSize(action, "Test row limit", "0 tests every row.", options.limit, true);
+                const std::string preview = promptText(action, "Preview image", "Enter y to display the first image, or n.", options.preview ? "y" : "n");
+                options.preview = preview == "y" || preview == "Y";
                 test(options);
             } else if (choice == 3) {
-                clearScreen();
-                std::cout << ansi::CYAN << ansi::BOLD << "PREDICT ONE IMAGE\n\n" << ansi::RESET;
-                options.testCsv = promptText("Test CSV", "CSV containing the image you want to inspect.", options.testCsv);
-                options.model = promptText("Model file", "Saved model used to make the prediction.", options.model);
-                const std::size_t index = promptSize("Image index", "Zero-based row index: 0 selects the first image after the CSV header.", 0, true);
+                const std::string action = "Predict an Image";
+                options.testCsv = promptText(action, "Test CSV", "CSV containing the image to inspect.", options.testCsv);
+                options.model = promptText(action, "Model file", "Saved model used for the prediction.", options.model);
+                const auto index = promptSize(action, "Image index", "Zero-based data row: 0 is the first image.", 0, true);
                 predictOne(options, index);
             } else if (choice == 4) {
-                clearScreen();
-                options.model = promptText("Model output", "File that will receive the randomly initialised network.", options.model);
-                const std::string architecture = promptText("Architecture", "Example: 784,64,10. The middle values are hidden layers.", joinArchitecture(options.architecture));
-                options.architecture = parseArchitecture(architecture);
-                options.rate = promptRate(options.rate);
-                const std::filesystem::path modelPath(options.model);
-                if (modelPath.has_parent_path()) std::filesystem::create_directories(modelPath.parent_path());
-                NeuralNetwork(options.architecture, options.rate, 20261023u).save(options.model);
-                std::cout << ansi::GREEN << "Initialised " << options.model << ansi::RESET << '\n';
+                const std::string action = "Initialise a Model";
+                options.model = promptText(action, "Model output", "Where to save the untrained network.", options.model);
+                options.architecture = parseArchitecture(promptText(action, "Architecture",
+                    "Comma-separated layer sizes with 784 inputs and 10 outputs.", joinArchitecture(options.architecture)));
+                options.rate = promptRate(action, options.rate);
+                initialise(options);
             } else if (choice == 5) {
-                clearScreen();
-                options.model = promptText("Model file", "Saved model whose configuration you want to inspect.", options.model);
+                options.model = promptText("Model Information", "Model file", "Saved model to inspect.", options.model);
                 modelInfo(options);
             } else if (choice == 6) {
-                clearScreen();
                 printHelp();
             } else if (choice == 7) {
+                ui::screen(SECTION, "Menu Closed");
                 return;
             } else {
-                std::cout << ansi::YELLOW << "Please choose a number from 1 to 7." << ansi::RESET << '\n';
+                fail("Choose a number from 1 to 7.");
             }
         } catch (const std::exception& error) {
-            std::cerr << ansi::RED << ansi::BOLD << "\nError: " << error.what() << ansi::RESET << '\n';
+            ui::error(SECTION, error.what());
         }
-        waitForEnter();
+        ui::waitForEnter();
     }
 }
-}
+} // namespace
 
 int runFashion(int argc, char** argv) {
     try {
@@ -430,23 +459,17 @@ int runFashion(int argc, char** argv) {
         const std::string command = argv[1];
         if (command == "predict") {
             if (argc < 3) fail("predict requires an image index. Example: predict 0");
-            const std::size_t index = cli::size(argv[2]);
-            predictOne(parseOptions(3, argc, argv), index);
+            predictOne(parseOptions(3, argc, argv), cli::size(argv[2]));
         } else if (command == "train") train(parseOptions(2, argc, argv));
         else if (command == "test") test(parseOptions(2, argc, argv));
-        else if (command == "init") {
-            const Options options = parseOptions(2, argc, argv);
-            const std::filesystem::path modelPath(options.model);
-            if (modelPath.has_parent_path()) std::filesystem::create_directories(modelPath.parent_path());
-            NeuralNetwork(options.architecture, options.rate, 20261023u).save(options.model);
-            std::cout << ansi::GREEN << "Initialised " << options.model << ansi::RESET << '\n';
-        } else if (command == "info") modelInfo(parseOptions(2, argc, argv));
-        else if (command == "menu") interactiveMenu();
+        else if (command == "init") initialise(parseOptions(2, argc, argv));
+        else if (command == "info") modelInfo(parseOptions(2, argc, argv));
+        else if (command == "menu") interactiveMenu(parseOptions(2, argc, argv));
         else if (command == "help" || command == "--help" || command == "-h") printHelp();
         else fail("Unknown command: " + command + ". Use 'help' to see available commands.");
         return 0;
     } catch (const std::exception& error) {
-        std::cerr << ansi::RED << ansi::BOLD << "Error: " << error.what() << ansi::RESET << '\n';
+        ui::error(SECTION, error.what());
         return 1;
     }
 }

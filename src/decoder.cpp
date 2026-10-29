@@ -9,9 +9,11 @@
  *       - Initial version (Jack Barnard, 2026-10-23)
  *       - Combined sections 3 and 4 into one CLI (2026-10-29)
  *       - Updated executable and model folder paths (2026-10-29)
+ *       - Unified terminal theme and in-place screens (2026-10-29)
  * ======================================================= */
 
 #include "ansi.hpp"
+#include "terminal.hpp"
 #include "cli.hpp"
 #include "commands.hpp"
 #include <filesystem>
@@ -30,6 +32,7 @@
 
 namespace {
 using namespace ansi;
+const std::string SECTION = "Section 3 - 4-bit Decoder";
 
 struct Options {
     std::string modelFile = "neuralNetworks/decoder.model";
@@ -37,46 +40,10 @@ struct Options {
     std::size_t reportInterval = 500;
     double learningRate = 0.3;
     std::vector<std::size_t> architecture = {4, 12, 16};
-    bool useColour = true;
 };
-
-std::string coloured(
-    const Options& options,
-    const char* code,
-    const std::string& text
-) {
-    return options.useColour
-        ? std::string(code) + text + RESET
-        : text;
-}
-
-void clearScreen(const Options& options) {
-    if (options.useColour) {
-        std::cout << CLEAR_SCREEN << CURSOR_HOME;
-    }
-}
-
-void displayBanner(const Options& options) {
-    std::cout
-        << coloured(options, CYAN, "========================================\n")
-        << coloured(options, BOLD, "       ELEC2300 Rho3 Neural Network\n")
-        << coloured(options, CYAN, "========================================\n");
-}
 
 [[noreturn]] void fail(const std::string& message) {
     throw std::invalid_argument(message);
-}
-
-void waitForEnter(const Options& options) {
-    std::cout << coloured(options, DIM, "\nPress Enter to continue...");
-    std::string line;
-    std::getline(std::cin, line);
-}
-
-std::string readLine() {
-    std::string line;
-    if (!std::getline(std::cin, line)) fail("Input ended");
-    return line;
 }
 
 void displayArchitecture(
@@ -121,19 +88,8 @@ std::vector<std::size_t> parseArchitecture(
     return architecture;
 }
 
-std::string askForModelFile(const Options& options) {
-    std::string fileName;
-    std::cout
-        << '\n'
-        << coloured(options, CYAN, "Model File\n")
-        << "----------------------------------------\n"
-        << "Enter model filename or path: ";
-
-    fileName = readLine();
-    if (fileName.empty()) {
-        fail("A model filename or path is required");
-    }
-    return fileName;
+std::string askForModelFile(const Options& options, const std::string& action) {
+    return ui::prompt(SECTION, action, "Model file", "Saved decoder model to load.", options.modelFile);
 }
 
 std::string nextArgumentValue(
@@ -180,7 +136,7 @@ void parseOptions(
                 nextArgumentValue(index, argc, argv, argument)
             );
         } else if (argument == "--no-colour") {
-            options.useColour = false;
+            ui::setEnabled(false);
         } else {
             fail("Unknown option: " + argument);
         }
@@ -236,74 +192,46 @@ std::size_t findPrediction(const Matrix& output) {
 }
 
 void trainModel(const Options& options) {
-    clearScreen(options);
-    displayBanner(options);
-
-    NeuralNetwork network(
-        options.architecture,
-        options.learningRate
-    );
-
-    std::cout
-        << '\n'
-        << coloured(options, YELLOW, "Training Configuration\n")
-        << "----------------------------------------\n"
-        << "Epochs:          " << options.epochs << '\n'
-        << "Learning rate:   " << options.learningRate << '\n'
-        << "Report interval: " << options.reportInterval << '\n'
-        << "Model file:      " << options.modelFile << '\n'
-        << "Architecture:    ";
-
-    displayArchitecture(options.architecture);
-    std::cout << "\n----------------------------------------\n\n";
-
+    auto renderProgress = [&](std::size_t epoch, double loss) {
+        // One current progress screen replaces the growing epoch transcript.
+        if (ui::enabled() || epoch == 0) {
+            ui::screen(SECTION, "Training");
+            std::cout << "Epochs:          " << options.epochs << '\n'
+                      << "Learning rate:   " << options.learningRate << '\n'
+                      << "Report interval: " << options.reportInterval << '\n'
+                      << "Model file:      " << options.modelFile << '\n'
+                      << "Architecture:    ";
+            displayArchitecture(options.architecture);
+            std::cout << "\n\n";
+        }
+        if (epoch == 0) {
+            std::cout << ui::styled(DIM, "Starting training...") << '\n';
+        } else {
+            std::cout << ui::styled(CYAN, "Epoch ") << epoch << '/' << options.epochs
+                      << "  " << ui::styled(YELLOW, "Loss ")
+                      << std::fixed << std::setprecision(8) << loss << '\n';
+        }
+        std::cout << std::flush;
+    };
+    renderProgress(0, 0.0);
+    NeuralNetwork network(options.architecture, options.learningRate);
     std::array<unsigned, 16> trainingOrder{};
-    for (unsigned value = 0; value < trainingOrder.size(); ++value) {
-        trainingOrder[value] = value;
-    }
-
+    for (unsigned value = 0; value < trainingOrder.size(); ++value) trainingOrder[value] = value;
     // A fixed seed makes the sample order repeatable between runs.
     std::mt19937 shuffleGenerator(20261023u);
-
     for (std::size_t epoch = 1; epoch <= options.epochs; ++epoch) {
-        std::shuffle(
-            trainingOrder.begin(),
-            trainingOrder.end(),
-            shuffleGenerator
-        );
-
+        std::shuffle(trainingOrder.begin(), trainingOrder.end(), shuffleGenerator);
         double totalLoss = 0.0;
-        for (unsigned value : trainingOrder) {
-            totalLoss += network.update(
-                makeBinaryInput(value),
-                makeTargetOutput(value)
-            );
-        }
-
-        const bool shouldReport =
-            epoch == 1 ||
-            epoch % options.reportInterval == 0 ||
-            epoch == options.epochs;
-
-        if (shouldReport) {
-            std::cout
-                << coloured(options, CYAN, "Epoch ")
-                << std::setw(6) << epoch
-                << "  "
-                << coloured(options, YELLOW, "Loss ")
-                << std::fixed << std::setprecision(8)
-                << totalLoss / 16.0
-                << '\n';
-        }
+        for (unsigned value : trainingOrder)
+            totalLoss += network.update(makeBinaryInput(value), makeTargetOutput(value));
+        if (epoch == 1 || epoch % options.reportInterval == 0 || epoch == options.epochs)
+            renderProgress(epoch, totalLoss / 16.0);
     }
-
     const std::filesystem::path path(options.modelFile);
     if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path());
     network.save(options.modelFile);
-    std::cout
-        << '\n'
-        << coloured(options, GREEN, "Training complete\n")
-        << "Saved model to: " << options.modelFile << '\n';
+    std::cout << '\n' << ui::styled(GREEN, "Training complete")
+              << "\nSaved model to: " << options.modelFile << '\n';
 }
 
 void predictValue(
@@ -316,23 +244,21 @@ void predictValue(
     const Matrix output = network.predict(makeBinaryInput(inputValue));
     const std::size_t prediction = findPrediction(output);
 
-    clearScreen(options);
-    displayBanner(options);
+    ui::screen(SECTION, "Prediction");
 
     std::cout
         << "\nModel:      " << options.modelFile
         << "\nInput:      " << inputValue
         << "\nPrediction: "
-        << coloured(
-            options,
-            prediction == inputValue ? GREEN : RED,
+        << ui::styled(prediction == inputValue ? GREEN : RED,
             std::to_string(prediction)
         )
-        << "\n\nOutput scores\n";
+        << "\n\n";
+    ui::heading("Output scores");
 
     for (std::size_t index = 0; index < output.rows(); ++index) {
         std::cout
-            << (index == prediction ? coloured(options, CYAN, "> ") : "  ")
+            << (index == prediction ? ui::styled(CYAN, "> ") : "  ")
             << std::setw(2) << index
             << "  " << std::fixed << std::setprecision(6)
             << output.at(index, 0)
@@ -346,8 +272,7 @@ void testModel(const Options& options) {
         fail("This is not a decoder model (expected 4 inputs and 16 outputs)");
     std::size_t correctPredictions = 0;
 
-    clearScreen(options);
-    displayBanner(options);
+    ui::screen(SECTION, "Test Results");
 
     std::cout
         << "\nModel: " << options.modelFile << "\n\n"
@@ -369,13 +294,13 @@ void testModel(const Options& options) {
             << std::setw(10) << predicted << "    "
             << std::fixed << std::setprecision(4)
             << std::setw(10) << confidence << "    "
-            << coloured(options, correct ? GREEN : RED, correct ? "PASS" : "FAIL")
+            << ui::styled(correct ? GREEN : RED, correct ? "PASS" : "FAIL")
             << '\n';
     }
 
     std::cout
         << "--------------------------------------------------\n"
-        << coloured(options, BOLD, "Correct: ")
+        << ui::styled(BOLD, "Correct: ")
         << correctPredictions << "/16\n";
 }
 
@@ -383,8 +308,7 @@ void displayModelInformation(const Options& options) {
     NeuralNetwork network = NeuralNetwork::load(options.modelFile);
     if (network.architecture().front() != 4 || network.architecture().back() != 16)
         fail("This is not a decoder model (expected 4 inputs and 16 outputs)");
-    clearScreen(options);
-    displayBanner(options);
+    ui::screen(SECTION, "Model Information");
 
     std::cout
         << "\nModel file:    " << options.modelFile
@@ -394,84 +318,58 @@ void displayModelInformation(const Options& options) {
     std::cout << '\n';
 }
 
-void displayHelp(const Options& options) {
-    clearScreen(options);
-    displayBanner(options);
+void displayHelp() {
+    ui::screen(SECTION, "Help");
+    ui::heading("Usage");
     std::cout
-        << "\nUsage:\n"
         << "  ./builds/neural_network decoder\n"
         << "  ./builds/neural_network decoder train [options]\n"
         << "  ./builds/neural_network decoder predict <0-15> [options]\n"
         << "  ./builds/neural_network decoder test [options]\n"
-        << "  ./builds/neural_network decoder info [options]\n\n"
-        << "Options:\n"
+        << "  ./builds/neural_network decoder info [options]\n\n";
+    ui::heading("Options");
+    std::cout
         << "  --epochs N\n"
         << "  --rate R\n"
         << "  --architecture 4,12,16\n"
         << "  --report N\n"
         << "  --model FILE (default: neuralNetworks/decoder.model)\n"
-        << "  --no-colour\n";
+        << "  --no-colour (disable ANSI colours and screen clearing)\n";
 }
 
 void readTrainingSettings(Options& options) {
-    clearScreen(options);
-    displayBanner(options);
-
-    std::cout << "\nEpochs: ";
-    options.epochs = cli::size(readLine());
-
-    std::cout << "Learning rate: ";
-    options.learningRate = cli::rate(readLine());
-
-    std::size_t hiddenLayerCount = 0;
-    std::cout << "Number of hidden layers: ";
-    hiddenLayerCount = cli::size(readLine());
-
-    std::size_t neuronsPerHiddenLayer = 0;
-    std::cout << "Neurons per hidden layer: ";
-    neuronsPerHiddenLayer = cli::size(readLine());
-
-    if (hiddenLayerCount == 0 || neuronsPerHiddenLayer == 0) {
+    const std::string action = "Train a New Model";
+    options.epochs = cli::size(ui::prompt(SECTION, action, "Epochs",
+        "One epoch trains on all 16 inputs.", std::to_string(options.epochs)));
+    options.learningRate = cli::rate(ui::prompt(SECTION, action, "Learning rate",
+        "Positive size of each weight update.", std::to_string(options.learningRate)));
+    const auto hiddenLayerCount = cli::size(ui::prompt(SECTION, action, "Number of hidden layers",
+        "Use at least one hidden layer.", std::to_string(options.architecture.size() - 2)));
+    const auto neuronsPerHiddenLayer = cli::size(ui::prompt(SECTION, action, "Neurons per hidden layer",
+        "Each hidden layer will use this width.", std::to_string(options.architecture.at(1))));
+    if (hiddenLayerCount == 0 || neuronsPerHiddenLayer == 0)
         fail("The network needs at least one non-empty hidden layer");
-    }
-
-    options.architecture.clear();
-    options.architecture.push_back(4);
-    for (std::size_t layer = 0; layer < hiddenLayerCount; ++layer) {
-        options.architecture.push_back(neuronsPerHiddenLayer);
-    }
+    options.architecture.assign(hiddenLayerCount, neuronsPerHiddenLayer);
+    options.architecture.insert(options.architecture.begin(), 4);
     options.architecture.push_back(16);
-
-    std::cout << "Report interval: ";
-    options.reportInterval = cli::size(readLine());
-
-    std::cout << "Model filename or path: ";
-    options.modelFile = readLine();
-
-    if (
-        options.epochs == 0 ||
-        options.learningRate <= 0.0 ||
-        options.reportInterval == 0 ||
-        options.modelFile.empty()
-    ) {
+    options.reportInterval = cli::size(ui::prompt(SECTION, action, "Report interval",
+        "Refresh training progress after this many epochs.", std::to_string(options.reportInterval)));
+    options.modelFile = ui::prompt(SECTION, action, "Model output",
+        "Where to save the trained weights and biases.", options.modelFile);
+    if (options.epochs == 0 || options.reportInterval == 0 || options.modelFile.empty())
         fail("Training settings are invalid");
-    }
 }
 
 void runMenu(Options options) {
     while (std::cin) {
-        clearScreen(options);
-        displayBanner(options);
-
-        std::cout
-            << "\n1. Train a new model\n"
-            << "2. Use a saved model\n"
-            << "3. Test a saved model\n"
-            << "4. Model information\n"
-            << "5. Help\n"
-            << "6. Quit\n"
-            << "Choice: ";
-
+        ui::screen(SECTION, "Decoder Menu");
+        ui::menuItem(1, "Train a new model");
+        ui::menuItem(2, "Use a saved model");
+        ui::menuItem(3, "Test a saved model");
+        ui::menuItem(4, "Model information");
+        ui::menuItem(5, "Help");
+        ui::menuItem(6, "Quit");
+        ui::choicePrompt();
         std::string line;
         if (!std::getline(std::cin, line)) return;
         try {
@@ -480,35 +378,29 @@ void runMenu(Options options) {
                 readTrainingSettings(options);
                 trainModel(options);
             } else if (choice == 2) {
-                options.modelFile = askForModelFile(options);
-                unsigned value = 0;
-                std::cout << "Input (0-15): ";
-                value = cli::size(readLine());
-                predictValue(options, value);
+                options.modelFile = askForModelFile(options, "Use a Saved Model");
+                const auto value = cli::size(ui::prompt(SECTION, "Use a Saved Model", "Input (0-15)",
+                    "Decimal value to encode as four binary inputs.", "0"));
+                if (value > 15) fail("Input must be between 0 and 15");
+                predictValue(options, static_cast<unsigned>(value));
             } else if (choice == 3) {
-                options.modelFile = askForModelFile(options);
+                options.modelFile = askForModelFile(options, "Test a Saved Model");
                 testModel(options);
             } else if (choice == 4) {
-                options.modelFile = askForModelFile(options);
+                options.modelFile = askForModelFile(options, "Model Information");
                 displayModelInformation(options);
             } else if (choice == 5) {
-                displayHelp(options);
+                displayHelp();
             } else if (choice == 6) {
+                ui::screen(SECTION, "Menu Closed");
                 return;
             } else {
-                std::cout << coloured(options, RED, "Invalid choice\n");
+                fail("Choose a number from 1 to 6.");
             }
         } catch (const std::exception& error) {
-            std::cerr
-                << coloured(
-                    options,
-                    RED,
-                    std::string("Error: ") + error.what()
-                )
-                << '\n';
+            ui::error(SECTION, error.what());
         }
-
-        waitForEnter(options);
+        ui::waitForEnter();
     }
 }
 
@@ -552,14 +444,14 @@ int runDecoder(int argc, char* argv[]) {
             command == "-h"
         ) {
             parseOptions(options, 2, argc, argv);
-            displayHelp(options);
+            displayHelp();
         } else {
             fail("Unknown command: " + command);
         }
 
         return 0;
     } catch (const std::exception& error) {
-        std::cerr << "Error: " << error.what() << '\n';
+        ui::error(SECTION, error.what());
         return 1;
     }
 }

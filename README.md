@@ -36,6 +36,29 @@ the generated executables and intermediate objects, retaining datasets and saved
 Use `make CXX=clang++` to select Clang. Header dependencies are tracked
 automatically. Run `make clean` before rebuilding with different compiler flags.
 
+## Terminal appearance and screen behaviour
+
+The main menu, decoder and Fashion-MNIST use the same decoder-inspired theme:
+cyan borders, menu numbers and prompts; a bold banner; yellow section headings;
+green success messages; red errors and incorrect predictions; and dim guidance.
+
+Each menu, input prompt, result, help page and error clears the screen with
+`ESC[2J` and then homes the cursor with `ESC[H` before drawing the common banner.
+Training progress replaces the previous report at the configured interval.
+Fashion-MNIST testing also refreshes progress at the sample report interval.
+Results, errors and interactive help stay visible until you press Enter, then
+the menu is redrawn. Enter at a settings prompt keeps its displayed current value.
+
+Use an ANSI-compatible terminal for this presentation. For plain text output,
+`--no-colour` disables both colours and screen control in all modes, including
+nested menus. It can be supplied before the mode or after the command:
+
+```sh
+./builds/neural_network --no-colour
+./builds/neural_network decoder test --no-colour
+./builds/neural_network fashion info --no-colour
+```
+
 ## Folder structure and Makefiles
 
 | Folder | Contents |
@@ -91,10 +114,10 @@ compiled with `-DNDEBUG`.
 ## Section 3: four-bit decoder
 
 ```sh
-./builds/neural_network decoder train --model neuralNetworks/decoder.model --no-colour
-./builds/neural_network decoder test --model neuralNetworks/decoder.model --no-colour
-./builds/neural_network decoder predict 7 --model neuralNetworks/decoder.model --no-colour
-./builds/neural_network decoder info --model neuralNetworks/decoder.model --no-colour
+./builds/neural_network decoder train --model neuralNetworks/decoder.model
+./builds/neural_network decoder test --model neuralNetworks/decoder.model
+./builds/neural_network decoder predict 7 --model neuralNetworks/decoder.model
+./builds/neural_network decoder info --model neuralNetworks/decoder.model
 ```
 
 Training uses all 16 input values, shuffled each epoch. An input is encoded
@@ -108,8 +131,8 @@ The predicted value is the index of the largest output activation.
 | `--epochs N` | `20000` | Training passes through all 16 inputs |
 | `--rate R` | `0.3` | Positive, finite learning rate |
 | `--architecture LIST` | `4,12,16` | Comma-separated layer sizes, without spaces |
-| `--report N` | `500` | Report loss every N epochs |
-| `--no-colour` | Off | Disable decoder colours and screen clearing |
+| `--report N` | `500` | Refresh training loss every N epochs |
+| `--no-colour` | Off | Disable ANSI colours and screen clearing |
 
 The architecture must start with 4, end with 16, and have at least one
 non-empty hidden layer. For example:
@@ -152,8 +175,9 @@ are actual classes and columns are predicted classes.
 | `--rate R` | `0.05` | Positive, finite learning rate |
 | `--architecture LIST` | `784,64,10` | Layer sizes; at least one hidden layer |
 | `--limit N` | `0` | First N samples for train/test; 0 uses all |
-| `--report N` | `1000` | Report loss every N training samples |
+| `--report N` | `1000` | Refresh progress every N training/test samples |
 | `--preview` | Off | Render the first image during testing |
+| `--no-colour` | Off | Disable ANSI colours and screen clearing |
 
 Fashion-MNIST requires 784 inputs and 10 outputs. For a quick pipeline check:
 
@@ -189,6 +213,7 @@ Class indices: 0 T-shirt/top, 1 Trouser, 2 Pullover, 3 Dress, 4 Coat,
 | `includes/commands.hpp` | Section entry-point declarations |
 | `includes/cli.hpp` | Shared numeric argument validation |
 | `includes/ansi.hpp` | Terminal formatting constants |
+| `src/terminal.cpp`, `includes/terminal.hpp` | Common theme, screen reset, prompts and errors |
 | `tests/test_matrix.cpp` | Matrix class tests and their standalone entry point |
 | `Makefile`, `tests/Makefile` | CLI and test builds, automatic header dependencies |
 
@@ -215,8 +240,8 @@ source includes. The decoder architecture parser now retains the requested
 layers. Numeric CLI inputs reject negative counts, trailing text, non-finite
 learning rates and invalid zero values. Command-line errors exit with status 1;
 successful commands exit with status 0. Test accuracy is reported as output,
-not as a process failure. Fashion-MNIST retains ANSI terminal formatting;
-`--no-colour` is a decoder-only option.
+not as a process failure. All application modes share the same terminal theme
+and support `--no-colour` for plain output.
 
 ## Validation
 
@@ -231,3 +256,8 @@ missing models and rejecting models from the wrong task.
 Fashion-MNIST training, testing, image prediction and model initialisation
 were exercised using a small synthetic CSV. This verifies the integration,
 not real Fashion-MNIST accuracy: the actual dataset was not attached.
+
+The presentation update was checked across the main menu and both section menus,
+including prompts, results, errors, help, section navigation and progress refreshes.
+ANSI output resets each screen before rendering; the global plain-output option
+also applies to nested menus.
