@@ -1,3 +1,15 @@
+/* ==================== ELEC2300 RHo3 ====================
+ * Author: Jack Barnard
+ * Date: 2026-10-23
+ * Project: RHo3
+ * Project Description: Neural networks for a 4-bit decoder and Fashion-MNIST
+ * File: matrix.cpp
+ * File Description: Shared matrix implementation and interface
+ * Change Log:
+ *       - Initial version (Jack Barnard, 2026-10-23)
+ *       - Combined sections 3 and 4 into one CLI (2026-10-29)
+ * ======================================================= */
+
 #include "matrix.hpp"
 
 #include <cmath>
@@ -170,6 +182,7 @@ Matrix Matrix::transpose() const {
     return result;
 }
 
+// Element-wise multiplication is distinct from the matrix product operator*.
 Matrix Matrix::hadamard(const Matrix& rhs) const {
     requireSameShape(rhs, "Hadamard product");
     Matrix result(rows_, cols_);

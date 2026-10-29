@@ -1,3 +1,15 @@
+/* ==================== ELEC2300 RHo3 ====================
+ * Author: Jack Barnard
+ * Date: 2026-10-23
+ * Project: RHo3
+ * Project Description: Neural networks for a 4-bit decoder and Fashion-MNIST
+ * File: matrix.hpp
+ * File Description: Shared matrix implementation and interface
+ * Change Log:
+ *       - Initial version (Jack Barnard, 2026-10-23)
+ *       - Combined sections 3 and 4 into one CLI (2026-10-29)
+ * ======================================================= */
+
 #pragma once
 
 #include <cstddef>
@@ -5,6 +17,7 @@
 #include <random>
 #include <vector>
 
+// Dense row-major matrix. Network activations are N-by-1 columns.
 class Matrix {
 public:
     Matrix();

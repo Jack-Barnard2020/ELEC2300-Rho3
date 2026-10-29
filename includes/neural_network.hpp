@@ -1,3 +1,15 @@
+/* ==================== ELEC2300 RHo3 ====================
+ * Author: Jack Barnard
+ * Date: 2026-10-23
+ * Project: RHo3
+ * Project Description: Neural networks for a 4-bit decoder and Fashion-MNIST
+ * File: neural_network.hpp
+ * File Description: Shared neural network implementation and interface
+ * Change Log:
+ *       - Initial version (Jack Barnard, 2026-10-23)
+ *       - Combined sections 3 and 4 into one CLI (2026-10-29)
+ * ======================================================= */
+
 #pragma once
 
 #include "matrix.hpp"
@@ -7,6 +19,7 @@
 #include <string>
 #include <vector>
 
+// Fully connected sigmoid layers; weights[l] has next-by-previous dimensions.
 class NeuralNetwork {
 public:
     NeuralNetwork(

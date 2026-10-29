@@ -1,471 +1,233 @@
-# ELEC2300 Rho3 - Neural Network
+# ELEC2300 RHo3 — Sections 3 and 4
 
-A C++ implementation of a small multilayer perceptron for the ELEC2300 Rho3 neural-network laboratory. The program implements its own `Matrix` class, trains a neural network as a **4-bit binary decoder**, saves trained weights to disk, and can reload models for prediction and testing.
+Author: **Jack Barnard**
 
-## Overview
+One C++17 command-line application for the section 3 four-bit decoder and
+section 4 Fashion-MNIST classifier. Both modes share the same `Matrix` and
+`NeuralNetwork` classes. The existing banner comment style and author credit
+are retained throughout the source.
 
-The decoder accepts one of the 16 possible 4-bit binary values and classifies it into one of 16 output classes. Internally, inputs are represented as a four-element column matrix and targets use a 16-element one-hot encoded column matrix.
+## Build and launch
 
-For example:
+Requires GNU Make and a C++17 compiler with `<filesystem>` support (GCC or
+Clang). No third-party C++ libraries are required. On Windows, use WSL or a
+suitable MinGW environment.
 
-```text
-Decimal input: 3
-Binary input:  0 0 1 1
-Target class:  3
-```
+Extract this project, open a terminal in its directory, then run:
 
-The network output contains 16 activation values. The output neuron with the largest activation is used as the predicted class.
-
-> **Note on confidence:** the CLI labels the winning sigmoid activation as `Confidence`. It is useful for comparing how strongly the model selects an output, but it is not a calibrated probability.
-
-## Project Structure
-
-```text
-ELEC2300-Rho3/
-├── Makefile
-├── README.md
-├── includes/
-│   ├── ansi.hpp
-│   ├── matrix.hpp
-│   └── neural_network.hpp
-└── src/
-    ├── main.cpp
-    ├── matrix.cpp
-    └── neural_network.cpp
-```
-
-### `includes/matrix.hpp` / `src/matrix.cpp`
-
-Defines and implements the `Matrix` class used throughout the network. It provides:
-
-- matrix addition and subtraction
-- matrix multiplication
-- scalar multiplication
-- matrix transposition
-- Hadamard (element-wise) multiplication
-- applying an activation function to every element
-- mean-squared value calculation for loss reporting
-- conversion of a vector into a column matrix
-- formatted stream output
-
-### `includes/neural_network.hpp` / `src/neural_network.cpp`
-
-Defines and implements the neural network. It handles:
-
-- configurable network architectures
-- sigmoid activation
-- forward propagation
-- backpropagation and weight updates
-- prediction
-- model serialisation
-- loading previously trained models
-
-### `includes/ansi.hpp`
-
-Contains ANSI escape sequences used by the command-line interface for colours, bold/dim text, clearing the screen, and returning the cursor home.
-
-### `src/main.cpp`
-
-Contains the user-facing command-line interface, training loop, decoder input/target generation, model testing, and command-line argument handling.
-
-## Requirements
-
-The project is written for C++17.
-
-On macOS, Apple's `clang++` can be used through the supplied Makefile. No OpenMP dependency is required by this version of the project.
-
-## Building
-
-From the root of the project:
-
-```bash
+```sh
 make
+./builds/neural_network
 ```
 
-This creates:
+The menu selects section 3 or section 4. Quitting a section returns to the
+main menu. You can also run commands directly:
 
-```text
-./neural_network
+```sh
+./builds/neural_network help
+./builds/neural_network decoder help
+./builds/neural_network fashion help
 ```
 
-To remove generated object files and the executable:
+`section3` and `section4` are aliases for `decoder` and `fashion`.
+`./builds/neural_network decoder` and `./builds/neural_network fashion` open the respective
+section menus. `make run` builds and opens the main menu; `make clean` removes
+the generated executables and intermediate objects, retaining datasets and saved weights.
+Use `make CXX=clang++` to select Clang. Header dependencies are tracked
+automatically. Run `make clean` before rebuilding with different compiler flags.
 
-```bash
-make clean
+## Folder structure and Makefiles
+
+| Folder | Contents |
+| --- | --- |
+| `src/` | Application `.cpp` files |
+| `includes/` | Shared `.hpp` headers |
+| `builds/` | Generated executables: `neural_network` and `test_matrix` |
+| `builds/obj/` | Generated object files and header dependency files |
+| `neuralNetworks/` | Default saved model weights: `decoder.model` and `fashion.model` |
+| `tests/` | C++ test sources and the test Makefile |
+
+The project-root `Makefile` defines the compilation and linking rules.
+`tests/Makefile` forwards to those rules, so it also works from the tests folder.
+Run application commands from the project root so relative data and weight paths
+resolve consistently. `--model FILE` can override the default weight path; put
+custom models under `neuralNetworks/` to keep the same layout. The archive
+includes empty `builds/` and `neuralNetworks/` directories; executables and
+weights are generated when you build or train.
+
+| Command (from the project root) | Result |
+| --- | --- |
+| `make` or `make app` | Build `builds/neural_network` |
+| `make run` | Build and run the interactive CLI |
+| `make matrix-test` | Build `builds/test_matrix` |
+| `make test` | Build and run the Matrix tests |
+| `make -C tests` | Build the Matrix test executable |
+| `make -C tests test` | Build and run the Matrix tests via the tests Makefile |
+| `make clean` | Remove generated executables, objects and dependency files |
+
+`make -C tests clean` forwards to the same root clean target, so it also removes
+the CLI executable. Both executables have independent `main()` functions; the
+test links only `tests/test_matrix.cpp` and `src/matrix.cpp`.
+
+## Matrix class tests
+
+```sh
+make test
+# Alternatively, from the tests directory:
+cd tests
+make test
 ```
 
-A debug build is also available:
+The standalone `tests/test_matrix.cpp` uses no third-party test framework.
+It checks construction, zero initialisation, element access, const access,
+bounds checks, addition, subtraction, rectangular matrix multiplication,
+scalar multiplication in both orders, transpose, Hadamard multiplication,
+function application, mean squared error, column vectors, copying, random
+initialisation and stream output. Invalid dimensions and empty loss inputs
+are checked for the expected exceptions. Each test prints PASS or FAIL;
+the program exits with status 1 if any test fails. Tests remain active when
+compiled with `-DNDEBUG`.
 
-```bash
-make debug
+## Section 3: four-bit decoder
+
+```sh
+./builds/neural_network decoder train --model neuralNetworks/decoder.model --no-colour
+./builds/neural_network decoder test --model neuralNetworks/decoder.model --no-colour
+./builds/neural_network decoder predict 7 --model neuralNetworks/decoder.model --no-colour
+./builds/neural_network decoder info --model neuralNetworks/decoder.model --no-colour
 ```
 
-## Interactive CLI
+Training uses all 16 input values, shuffled each epoch. An input is encoded
+most-significant bit first: 3 becomes `[0, 0, 1, 1]`. The target is a 16-element
+one-hot vector with index 3 set to 1. Internally these are column matrices.
+The predicted value is the index of the largest output activation.
 
-Start the program without arguments:
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--model FILE` | `neuralNetworks/decoder.model` | Model to save or load |
+| `--epochs N` | `20000` | Training passes through all 16 inputs |
+| `--rate R` | `0.3` | Positive, finite learning rate |
+| `--architecture LIST` | `4,12,16` | Comma-separated layer sizes, without spaces |
+| `--report N` | `500` | Report loss every N epochs |
+| `--no-colour` | Off | Disable decoder colours and screen clearing |
 
-```bash
-./neural_network
+The architecture must start with 4, end with 16, and have at least one
+non-empty hidden layer. For example:
+
+```sh
+./builds/neural_network decoder train --architecture 4,16,12,16 --epochs 25000 --model neuralNetworks/decoder-deep.model
 ```
 
-The main menu provides:
+## Section 4: Fashion-MNIST
 
-```text
-1. Train a new model
-2. Use a saved model
-3. Test a saved model
-4. Model information
-5. Help
-6. Quit
+The dataset is **not included**. Use the training and test CSV files supplied
+with the lab. Each file must begin with a header such as
+`label,pixel1,...,pixel784`. Every following non-empty row must contain one
+label (0–9) and 784 pixel integers (0–255). Pixels are normalised by dividing
+by 255; targets are one-hot vectors. Rows are streamed from disk each epoch
+in their original order.
+
+Place the files in the project directory, `data/`, `datasets/`, or
+`Optional Work/`, or provide their paths explicitly. Relative paths are
+resolved from the terminal's current working directory. Quote paths with spaces.
+
+```sh
+./builds/neural_network fashion train --train-csv data/fashion-mnist_train.csv --model neuralNetworks/fashion.model --epochs 3
+./builds/neural_network fashion test --test-csv data/fashion-mnist_test.csv --model neuralNetworks/fashion.model --preview
+./builds/neural_network fashion predict 0 --test-csv data/fashion-mnist_test.csv --model neuralNetworks/fashion.model
+./builds/neural_network fashion info --model neuralNetworks/fashion.model
 ```
 
-## Training a Model
+`predict INDEX` uses a **zero-based data-row index**, excluding the header and
+blank lines. It renders the 28×28 image as terminal characters and prints all
+10 output scores. `test` prints accuracy and a confusion matrix whose rows
+are actual classes and columns are predicted classes.
 
-Select **Train a new model** from the interactive menu.
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--train-csv FILE` | `fashion-mnist_train.csv` | Training CSV |
+| `--test-csv FILE` | `fashion-mnist_test.csv` | Test or prediction CSV |
+| `--model FILE` | `neuralNetworks/fashion.model` | Model to save or load |
+| `--epochs N` | `3` | Passes through selected training rows |
+| `--rate R` | `0.05` | Positive, finite learning rate |
+| `--architecture LIST` | `784,64,10` | Layer sizes; at least one hidden layer |
+| `--limit N` | `0` | First N samples for train/test; 0 uses all |
+| `--report N` | `1000` | Report loss every N training samples |
+| `--preview` | Off | Render the first image during testing |
 
-The CLI asks for:
+Fashion-MNIST requires 784 inputs and 10 outputs. For a quick pipeline check:
 
-1. number of epochs
-2. learning rate
-3. number of hidden layers
-4. neurons per hidden layer
-5. reporting interval
-6. model filename or path
-
-The decoder input and output sizes are fixed at four and sixteen neurons. Every hidden layer uses the neuron count entered by the user.
-
-For example:
-
-```text
-Epochs: 20000
-Learning rate: 0.3
-Number of hidden layers: 2
-Neurons per hidden layer: 16
-Report interval: 500
-Model filename or path: models/decoder.model
+```sh
+./builds/neural_network fashion train --limit 100 --epochs 1 --model neuralNetworks/quick.model
+./builds/neural_network fashion test --limit 20 --model neuralNetworks/quick.model
 ```
 
-This generates the architecture:
+To create an untrained model, or try another architecture for section 4.2:
 
-```text
-4 -> 16 -> 16 -> 16
+```sh
+./builds/neural_network fashion init --architecture 784,128,10 --model neuralNetworks/untrained.model
+./builds/neural_network fashion train --architecture 784,128,64,10 --model neuralNetworks/fashion-deep.model
 ```
 
-During training, the program reports the mean loss at the chosen interval:
-
-```text
-Epoch      1  Loss 0.12345678
-Epoch    500  Loss 0.04567890
-Epoch   1000  Loss 0.01234567
-```
-
-The exact values depend on the model and training run. A useful training run should show loss reducing as training progresses.
-
-### Training from the command line
-
-A model can also be trained without the interactive menu:
-
-```bash
-./neural_network train \
-    --epochs 20000 \
-    --rate 0.3 \
-    --architecture 4,16,16,16 \
-    --report 500 \
-    --model models/decoder.model
-```
-
-The architecture supplied with `--architecture` must:
-
-- start with `4`
-- contain at least one hidden layer
-- end with `16`
-
-Example valid architectures:
-
-```text
-4,8,16
-4,12,16
-4,32,32,16
-4,64,64,64,16
-```
-
-## Using a Saved Model
-
-From the interactive menu, select:
-
-```text
-2. Use a saved model
-```
-
-The program first asks for the model filename or path:
-
-```text
-Enter model filename or path: models/decoder.model
-```
-
-Both relative and absolute paths can be supplied, for example:
-
-```text
-decoder.model
-models/decoder.model
-../models/decoder.model
-/Users/username/Documents/ELEC2300-Rho3/models/decoder.model
-```
-
-The CLI then asks for a decimal input from `0` to `15` and displays the predicted class and all 16 output activations.
-
-From the command line:
-
-```bash
-./neural_network predict 5 --model models/decoder.model
-```
-
-## Testing a Saved Model
-
-Select:
-
-```text
-3. Test a saved model
-```
-
-Enter the filename or path of the model to test. The program evaluates all 16 possible 4-bit inputs and displays:
-
-- input value
-- predicted class
-- winning output activation (`Confidence`)
-- PASS or FAIL
-
-Example layout:
-
-```text
-Input    Prediction    Confidence    Result
---------------------------------------------------
-    0             0        0.9812    PASS
-    1             1        0.9734    PASS
-    2             2        0.9641    PASS
-    ...
---------------------------------------------------
-Correct: 16/16
-```
-
-The values above are illustrative only.
-
-Command-line equivalent:
-
-```bash
-./neural_network test --model models/decoder.model
-```
-
-## Model Information
-
-The model-information command loads a saved model and displays its stored learning rate and architecture.
-
-Interactive menu:
-
-```text
-4. Model information
-```
-
-Command line:
-
-```bash
-./neural_network info --model models/decoder.model
-```
-
-Example:
-
-```text
-Model file:    models/decoder.model
-Learning rate: 0.3
-Architecture:  4 -> 16 -> 16 -> 16
-```
-
-## Command-Line Reference
-
-```text
-./neural_network
-./neural_network menu
-./neural_network train [options]
-./neural_network predict <0-15> [options]
-./neural_network test [options]
-./neural_network info [options]
-./neural_network help
-```
-
-Available options:
-
-```text
---epochs N
-    Number of training epochs.
-
---rate R
-    Learning rate used during training.
-
---architecture 4,...,16
-    Network architecture when training.
-
---report N
-    Number of epochs between loss reports.
-
---model FILE
-    Model filename or path to save/load.
-
---no-colour
-    Disable ANSI terminal formatting.
-```
-
-## How the Neural Network Works
-
-### Forward propagation
-
-Each layer calculates a weighted input using:
-
-```text
-z = W * a + b
-```
-
-where:
-
-- `W` is the layer's weight matrix
-- `a` is the activation from the previous layer
-- `b` is the bias matrix
-
-The sigmoid activation function is then applied to each value:
-
-```text
-sigmoid(x) = 1 / (1 + exp(-x))
-```
-
-The resulting activation is passed to the next layer.
-
-### Training and backpropagation
-
-For each training example the program:
-
-1. runs forward propagation
-2. compares the predicted output with the one-hot target
-3. calculates a loss value
-4. works backwards through the network
-5. calculates the activation derivative
-6. calculates the layer error/gradient
-7. calculates changes to the weights and biases
-8. applies those changes using the learning rate
-
-The 16 decoder examples are shuffled between training epochs in the current implementation.
-
-### Weight initialisation
-
-Random weights are initialised using a Xavier/Glorot-style uniform range. This helps keep sigmoid inputs in a useful range when the network contains multiple layers.
-
-## Model File Format
-
-Models are stored as plain text.
-
-The file contains:
-
-1. number of network layers
-2. size of each layer
-3. learning rate
-4. weight values for each layer
-5. bias values for each layer
-
-The same program can therefore reconstruct the architecture before reading the stored weights and biases.
-
-Model files are intended to be read and written by the program rather than edited manually.
-
-## Suggested Starting Configuration
-
-A useful starting point for the 4-bit decoder is:
-
-```text
-Epochs:                  20000
-Learning rate:           0.3
-Number of hidden layers: 1
-Neurons per hidden layer: 12
-Report interval:         500
-```
-
-Architecture:
-
-```text
-4 -> 12 -> 16
-```
-
-This is a project recommendation rather than a required laboratory setting. Once the basic model trains correctly, architectures with different hidden-layer counts and widths can be compared.
-
-## Interpreting Results
-
-### Loss
-
-Loss is reported during training to make it easier to see whether the model is learning. A run that remains almost constant for a large number of epochs is worth investigating before simply increasing the model size or epoch count.
-
-### Accuracy
-
-The test command checks all 16 possible 4-bit inputs. `16/16` means the network selected the correct output neuron for every possible decoder input.
-
-### Confidence
-
-`Confidence` is the sigmoid activation of the winning output neuron.
-
-For example:
-
-```text
-Prediction: 7
-Confidence: 0.96
-```
-
-means output neuron 7 had an activation of approximately `0.96` and was the largest output. It should not be interpreted as a calibrated 96% statistical probability.
-
-## Troubleshooting
-
-### `Cannot open model file`
-
-Check that the model exists and supply either the correct relative path or its absolute path.
-
-For example:
-
-```text
-models/decoder.model
-```
-
-instead of:
-
-```text
-decoder.model
-```
-
-if the model is stored in the `models` directory.
-
-### Model predicts the same class for every input
-
-Check the training-loss trace. If loss quickly falls and then remains almost unchanged while accuracy stays poor, use a smaller architecture first and confirm the training implementation is behaving correctly.
-
-A useful diagnostic architecture is:
-
-```text
-4 -> 12 -> 16
-```
-
-### Very deep networks train poorly
-
-This project uses sigmoid activations and a deliberately simple neural-network implementation. Start with one or two hidden layers before experimenting with much deeper networks.
-
-### ANSI codes appear as text
-
-Run the program in a terminal with ANSI escape-code support. ANSI formatting can also be disabled using:
-
-```bash
-./neural_network menu --no-colour
-```
-
-## Laboratory Context
-
-This project was created for the ELEC2300 Rho3 Neural Networks laboratory. The laboratory covers matrix manipulation in C++, building a simple neural-network model, training a 4-bit binary decoder, monitoring loss, saving/loading trained weights, and experimenting with network architecture.
-
-The laboratory documentation should be treated as the authoritative source for assignment requirements.
-
-## Author
-
-**Jack Barnard**  
-ELEC2300 Rho3  
-2026
+Training starts a **new** network; it does not resume a saved model. Use
+separate model filenames when comparing architectures. Keep the dataset,
+epoch count and sample limit consistent and record the test accuracy yourself.
+No section 4.2 experimental results are invented here.
+
+Class indices: 0 T-shirt/top, 1 Trouser, 2 Pullover, 3 Dress, 4 Coat,
+5 Sandal, 6 Shirt, 7 Sneaker, 8 Bag, 9 Ankle boot.
+
+## Source layout and implementation
+
+| File | Responsibility |
+| --- | --- |
+| `src/main.cpp` | Single entry point, mode dispatch and main menu |
+| `src/decoder.cpp` | Section 3 commands, encoding and training loop |
+| `src/fashion.cpp` | Section 4 commands, CSV streaming and image display |
+| `src/matrix.cpp`, `includes/matrix.hpp` | Shared dense matrix operations |
+| `src/neural_network.cpp`, `includes/neural_network.hpp` | Forward pass, backpropagation and model persistence |
+| `includes/commands.hpp` | Section entry-point declarations |
+| `includes/cli.hpp` | Shared numeric argument validation |
+| `includes/ansi.hpp` | Terminal formatting constants |
+| `tests/test_matrix.cpp` | Matrix class tests and their standalone entry point |
+| `Makefile`, `tests/Makefile` | CLI and test builds, automatic header dependencies |
+
+The shared implementation uses the readable section 3 code, which implements
+the same calculations as section 4. The network uses sigmoid activations,
+Xavier uniform weight initialisation, zero biases and per-sample updates.
+Reported loss is mean squared error before each update. Backpropagation
+propagates the unscaled delta through the old weights before updating them.
+Output scores are sigmoid activations, not calibrated class probabilities.
+
+Fixed seeds preserve the original defaults: decoder weights use 5489;
+decoder shuffling and Fashion-MNIST weights use 20261023. Numerical results
+may vary slightly between standard-library/compiler implementations.
+
+The plain-text model format is unchanged: layer count, layer sizes, learning
+rate, then weights and biases for each layer, with 17-digit precision.
+Existing models from either section remain readable. Prediction and testing
+check the input/output dimensions to reject models from the other task.
+Save paths create missing parent directories. Saving replaces an existing file
+at that path, so use distinct names to keep previous training runs.
+
+The uploaded `.h` filenames were standardised to `.hpp`, matching the original
+source includes. The decoder architecture parser now retains the requested
+layers. Numeric CLI inputs reject negative counts, trailing text, non-finite
+learning rates and invalid zero values. Command-line errors exit with status 1;
+successful commands exit with status 0. Test accuracy is reported as output,
+not as a process failure. Fashion-MNIST retains ANSI terminal formatting;
+`--no-colour` is a decoder-only option.
+
+## Validation
+
+The combined project was compiled with GCC using C++17, optimisation and
+`-Wall -Wextra -Wpedantic`, with no warnings. The default decoder trained and
+correctly classified all 16 inputs after saving and loading its model.
+The new standalone Matrix test suite passes all 14 test groups. Both Makefiles
+were checked, including a clean rebuild, test-only build and header dependency
+tracking. Checks also covered custom hidden layers, both menus, invalid CLI arguments,
+missing models and rejecting models from the wrong task.
+
+Fashion-MNIST training, testing, image prediction and model initialisation
+were exercised using a small synthetic CSV. This verifies the integration,
+not real Fashion-MNIST accuracy: the actual dataset was not attached.

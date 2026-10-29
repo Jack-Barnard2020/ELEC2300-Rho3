@@ -1,3 +1,15 @@
+/* ==================== ELEC2300 RHo3 ====================
+ * Author: Jack Barnard
+ * Date: 2026-10-23
+ * Project: RHo3
+ * Project Description: Neural networks for a 4-bit decoder and Fashion-MNIST
+ * File: neural_network.cpp
+ * File Description: Shared neural network implementation and interface
+ * Change Log:
+ *       - Initial version (Jack Barnard, 2026-10-23)
+ *       - Combined sections 3 and 4 into one CLI (2026-10-29)
+ * ======================================================= */
+
 #include "neural_network.hpp"
 
 #include <cmath>
@@ -19,7 +31,7 @@ NeuralNetwork::NeuralNetwork(
         );
     }
 
-if (!std::isfinite(learningRate) || learningRate <= 0.0) {
+    if (!std::isfinite(learningRate) || learningRate <= 0.0) {
         throw std::invalid_argument(
             "Learning rate must be positive and finite"
         );
@@ -53,6 +65,7 @@ if (!std::isfinite(learningRate) || learningRate <= 0.0) {
     }
 }
 
+// Separate branches avoid overflowing exp() for large negative inputs.
 double NeuralNetwork::sigmoid(double value) {
     if (value >= 0.0) {
         const double exponent = std::exp(-value);
@@ -171,6 +184,8 @@ void NeuralNetwork::save(
         );
     }
 
+    // Text layout: layer count, sizes, rate, then weights and biases per layer.
+    // Preserve enough digits to round-trip doubles and existing section models.
     output.precision(17);
     output << architecture_.size() << '\n';
 

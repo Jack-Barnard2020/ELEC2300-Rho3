@@ -2,17 +2,17 @@
  * Author: Jack Barnard
  * Date: 2026-10-23
  * Project: RHo3
- * Project Description: A simple neural network implementation. Neural network acts as a 4-bit decoder
+ * Project Description: Neural networks for a 4-bit decoder and Fashion-MNIST
  * File: ansi.hpp
  * File Description: ANSI escape codes for terminal formatting
  * Change Log:
  *       - Initial version (Jack Barnard, 2026-10-23)
- *       - Updated to include clear screen and cursor home codes (Jack Barnard, 2026-10-23)
+ *       - Combined sections 3 and 4 into one CLI (2026-10-29)
  * ======================================================= */
 
 #pragma once
 
-namespace {
+namespace ansi {
 constexpr const char* RESET        = "\033[0m";
 constexpr const char* BOLD         = "\033[1m";
 constexpr const char* DIM          = "\033[2m";
