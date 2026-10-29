@@ -2,7 +2,7 @@
 
 Author: **Jack Barnard**
 
-One C++17 command-line application for the section 3 four-bit decoder and
+command-line application for the section 3 four-bit decoder and
 section 4 Fashion-MNIST classifier. Both modes share the same `Matrix` and
 `NeuralNetwork` classes. The existing banner comment style and author credit
 are retained throughout the source.
