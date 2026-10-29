@@ -71,4 +71,6 @@ Testing/
 # vscode 
 .vscode/
 
-# 
+# training data
+.data/
+/data/*.csv
