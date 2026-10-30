@@ -1,6 +1,4 @@
-# ELEC2300 RHo3 — Sections 3 and 4
-
-Author: **Jack Barnard**
+# ELEC2300 RHo3
 
 command-line application for the section 3 four-bit decoder and
 section 4 Fashion-MNIST classifier. Both modes share the same `Matrix` and
